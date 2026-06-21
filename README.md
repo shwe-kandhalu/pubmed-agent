@@ -1,13 +1,14 @@
 # PubMed Research Agent
 
-An AI-powered research assistant that searches PubMed and summarizes scientific literature using Claude.
+An AI-powered research assistant that searches PubMed, retrieves full-text papers from PubMed Central, and synthesizes scientific literature using Claude.
 
 ## How it works
 
 1. You ask a research question
-2. The agent searches PubMed for relevant papers
-3. It fetches and reads the abstracts
-4. Claude synthesizes a structured report with key findings, themes, clinical implications, and research gaps
+2. The agent searches PubMed — and refines its query if initial results are sparse
+3. It screens abstracts to identify the most relevant papers
+4. For the top papers, it fetches full text (methods, results, discussion) from PubMed Central
+5. Claude synthesizes a structured report with key findings, themes, clinical implications, and research gaps
 
 ## Setup
 
@@ -62,5 +63,5 @@ Common Themes
 ## Stack
 
 - [Claude](https://anthropic.com) — LLM reasoning and report generation
-- [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/books/NBK25497/) — PubMed search and abstract retrieval
+- [NCBI E-utilities](https://www.ncbi.nlm.nih.gov/books/NBK25497/) — PubMed search, abstract retrieval, and PubMed Central full-text access
 - Python `requests` for API calls
