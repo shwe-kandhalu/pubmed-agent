@@ -1,5 +1,5 @@
 {
-  "name": "pubmed-agent-frontend",
+  "name": "literature-review-agent-frontend",
   "version": "0.1.0",
   "scripts": {
     "dev": "vite",
