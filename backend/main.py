@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from agent_core import run_agent_streaming
 from auth import require_auth
+from rate_limit import enforce_rate_limit
 import rag
 from sources import source_list
 
@@ -37,7 +38,7 @@ class ResearchRequest(BaseModel):
     domain: str = ""
 
 
-@app.post("/api/research")
+@app.post("/api/research", dependencies=[Depends(enforce_rate_limit)])
 async def research(body: ResearchRequest):
     return StreamingResponse(
         run_agent_streaming(body.question, body.domain),

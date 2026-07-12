@@ -34,6 +34,7 @@ GOLDEN_SET_PATH = os.path.join(os.path.dirname(__file__), "golden_set.jsonl")
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "results")
 
 REQUIRED_SECTIONS = ["## Key Findings", "## Common Themes", "## Implications", "## Research Gaps"]
+RECALL_THRESHOLD = 0.5
 
 JUDGE_PROMPT = """You are grading a scientific literature review report for quality. Score each dimension 1-5 (5 = excellent).
 
@@ -175,6 +176,13 @@ def main():
     with open(out_path, "w") as f:
         json.dump({"retrieval": retrieval_results, "full": full_results}, f, indent=2)
     print(f"\nResults written to {out_path}")
+
+    if avg_recall < RECALL_THRESHOLD:
+        print(f"\nFAIL: avg recall@10 {avg_recall:.2f} is below the {RECALL_THRESHOLD:.2f} threshold")
+        sys.exit(1)
+    if args.full and not all(r["trajectory"]["passed"] for r in full_results):
+        print("\nFAIL: one or more trajectory checks failed")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

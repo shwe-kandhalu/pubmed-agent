@@ -1,7 +1,7 @@
-anthropic
-fastapi
-uvicorn[standard]
-requests
-python-dotenv
-chromadb
-sentence-transformers
+anthropic==0.116.0
+fastapi==0.139.0
+uvicorn[standard]==0.51.0
+requests==2.34.2
+python-dotenv==1.2.2
+chromadb==1.5.9
+sentence-transformers==5.6.0
