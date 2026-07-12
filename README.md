@@ -6,10 +6,27 @@ An AI-powered research assistant that searches multiple literature databases —
 
 1. You ask a research question
 2. The agent searches across literature sources in parallel, refining its query if initial results are sparse
-3. It screens abstracts to identify the most relevant papers, indexing everything it reads into a local vector knowledge base
+3. It screens abstracts to identify the most relevant papers, indexing everything it reads into a knowledge base scoped to this run (no cross-session leakage)
 4. For the top papers, it fetches full text where available (open-access PubMed Central / Europe PMC articles)
 5. It retrieves the most relevant indexed content and grounds the final synthesis in it
-6. Claude writes a structured report: key findings, common themes, implications, and research gaps
+6. Claude writes a structured report: key findings, common themes, implications, and research gaps, with citations linked to a References list — any citation the model never actually retrieved into context is flagged in the UI
+
+## Evals
+
+`backend/evals/` holds a golden set of research questions with real, relevance-ranked PubMed ids as ground truth (fetched live from NCBI, not hand-picked), plus a harness (`run_eval.py`) that checks three things:
+
+- **Retrieval recall@k** — does `search_literature` surface the same top PubMed results PubMed's own relevance ranking would give? (No LLM cost — this is how a bug where PubMed search was silently defaulting to most-recent-first instead of most-relevant got caught.)
+- **Trajectory checks** — from a live run's trace: did it stay within its search budget, call `retrieve_relevant_context` before synthesizing, avoid citing papers it never actually retrieved, stay under the word limit, and hit all required report sections?
+- **LLM-judge quality** — a second Claude call scores the report against a rubric (format, citation density, coherence, conciseness).
+
+```
+python backend/evals/run_eval.py            # retrieval recall only — fast, free
+python backend/evals/run_eval.py --full      # all three layers — slower, uses API credits
+```
+
+## Observability
+
+Every run writes a structured trace to `backend/logs/runs.jsonl` — per-model-call token usage/latency, per-tool-call duration, search count, whether retrieval grounded the synthesis, and citation/groundedness counts. Backend-only; not surfaced in the UI. The eval harness reads the same trace shape.
 
 ## Setup
 

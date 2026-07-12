@@ -3,4 +3,8 @@ __pycache__/
 *.pyc
 node_modules/
 backend/chroma_db/
+backend/logs/
+backend/evals/results/
 .DS_Store
+.venv/
+frontend/dist/

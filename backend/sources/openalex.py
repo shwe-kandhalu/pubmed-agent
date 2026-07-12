@@ -54,6 +54,7 @@ def search(query: str, max_results: int = 8) -> list[dict]:
             "authors": authors,
             "year": doc.get("publication_year", ""),
             "doi": (doc.get("doi") or "").replace("https://doi.org/", ""),
+            "evidence_tier": "unclassified",
         })
     return papers
 

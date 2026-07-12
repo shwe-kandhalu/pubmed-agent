@@ -1,7 +1,7 @@
 """PubMed / PubMed Central source. E-utilities API, no key required (NCBI rate-limits by IP)."""
 import requests
 
-from .common import parse_jats_xml
+from .common import classify_evidence_tier, parse_jats_xml
 
 KEY = "pubmed"
 LABEL = "PubMed"
@@ -15,7 +15,13 @@ _ELINK = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/elink.fcgi"
 def search(query: str, max_results: int = 8) -> list[dict]:
     resp = requests.get(
         _ESEARCH,
-        params={"db": "pubmed", "term": query, "retmax": min(max_results, 20), "retmode": "json"},
+        params={
+            "db": "pubmed",
+            "term": query,
+            "retmax": min(max_results, 20),
+            "retmode": "json",
+            "sort": "relevance",
+        },
         timeout=10,
     )
     resp.raise_for_status()
@@ -42,6 +48,7 @@ def search(query: str, max_results: int = 8) -> list[dict]:
             "authors": authors,
             "year": (doc.get("pubdate", "") or "")[:4],
             "doi": next((eid.get("value", "") for eid in doc.get("articleids", []) if eid.get("idtype") == "doi"), ""),
+            "evidence_tier": classify_evidence_tier(doc.get("pubtype", [])),
         })
     return papers
 

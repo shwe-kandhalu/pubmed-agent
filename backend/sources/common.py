@@ -8,6 +8,48 @@ import requests
 TARGET_SECTIONS = {"RESULT", "DISCUSSION", "CONCLUSION", "METHOD", "FINDING"}
 _RETRY_STATUS = {429, 503}
 
+# Evidence hierarchy, strongest first. Checked in this order so a paper tagged both
+# "Meta-Analysis" and "Review" (common in MEDLINE) lands in the stronger tier.
+_SYSTEMATIC_REVIEW_TERMS = {"systematic review", "systematic-review", "meta-analysis", "meta analysis"}
+_RCT_TERMS = {
+    "randomized controlled trial", "randomized-controlled-trial", "controlled clinical trial",
+    "clinical trial", "clinical trial, phase i", "clinical trial, phase ii",
+    "clinical trial, phase iii", "clinical trial, phase iv", "pragmatic clinical trial",
+}
+_OBSERVATIONAL_TERMS = {
+    "observational study", "cohort studies", "case-control studies", "comparative study",
+    "multicenter study",
+}
+_CASE_REPORT_TERMS = {"case reports", "case-report", "case report"}
+_REVIEW_TERMS = {"review", "review-article", "brief-report"}
+
+EVIDENCE_TIER_LABELS = {
+    "systematic_review": "Systematic Review / Meta-Analysis",
+    "rct": "RCT",
+    "observational": "Observational Study",
+    "case_report": "Case Report",
+    "review": "Review (non-systematic)",
+    "unclassified": "Not classified",
+}
+
+
+def classify_evidence_tier(pub_types: list[str]) -> str:
+    """Classify a paper's evidence strength from its publication-type tags. Only call this with
+    real controlled-vocabulary tags (MEDLINE PublicationType, JATS article-type) — never infer
+    this from abstract text, since a wrong tier reads as a false confidence signal."""
+    normalized = {t.strip().lower() for t in pub_types if t}
+    if normalized & _SYSTEMATIC_REVIEW_TERMS:
+        return "systematic_review"
+    if normalized & _RCT_TERMS:
+        return "rct"
+    if normalized & _OBSERVATIONAL_TERMS:
+        return "observational"
+    if normalized & _CASE_REPORT_TERMS:
+        return "case_report"
+    if normalized & _REVIEW_TERMS:
+        return "review"
+    return "unclassified"
+
 
 def request_with_retry(method: str, url: str, *, retries: int = 2, backoff: float = 1.5, **kwargs) -> requests.Response:
     last_exc = None

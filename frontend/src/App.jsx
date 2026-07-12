@@ -1,5 +1,9 @@
 import { useState, useRef, useEffect } from 'react'
 
+// Empty in local dev (Vite's dev-server proxy handles relative /api calls). Set at build time
+// to the deployed backend's URL (e.g. https://your-app.up.railway.app) for production builds.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
+
 const TOOL_META = {
   search_literature: {
     icon: '🔍',
@@ -77,7 +81,7 @@ function LoginGate({ onAuthed }) {
     setChecking(true)
     setError(null)
     try {
-      const resp = await fetch('/api/kb/count', {
+      const resp = await fetch(`${API_BASE}/api/kb/count`, {
         headers: { 'X-App-Password': password },
       })
       if (resp.status === 401) {
@@ -115,8 +119,121 @@ function LoginGate({ onAuthed }) {
   )
 }
 
-function ReportBlock({ text }) {
+const SOURCE_KEYS = ['pubmed', 'semantic_scholar', 'openalex', 'europepmc', 'crossref']
+const CITATION_ID = `(?:${SOURCE_KEYS.join('|')}):[^\\s,;()]+`
+const CITATION_GROUP = new RegExp(
+  `\\(${CITATION_ID}(?:[,;]\\s*${CITATION_ID})*\\)`,
+  'g'
+)
+
+function splitCitationIds(group) {
+  return group.slice(1, -1).split(/[,;]/).map(s => s.trim())
+}
+
+function collectCitationOrder(text) {
+  const order = []
+  const seen = new Set()
+  for (const group of text.match(CITATION_GROUP) ?? []) {
+    for (const id of splitCitationIds(group)) {
+      if (!seen.has(id)) {
+        seen.add(id)
+        order.push(id)
+      }
+    }
+  }
+  return order
+}
+
+function renderLineWithCitations(line, citationNumbers, key) {
+  const parts = []
+  let lastIndex = 0
+  let match
+  const re = new RegExp(CITATION_GROUP)
+  while ((match = re.exec(line)) !== null) {
+    if (match.index > lastIndex) parts.push(line.slice(lastIndex, match.index))
+    const ids = splitCitationIds(match[0])
+    parts.push(
+      <sup key={`${key}-${match.index}`} style={styles.citation}>
+        [{ids.map((id, i) => (
+          <span key={id}>
+            {i > 0 && ','}
+            <a href={`#ref-${id}`} style={styles.citationLink}>{citationNumbers[id] ?? '?'}</a>
+          </span>
+        ))}]
+      </sup>
+    )
+    lastIndex = match.index + match[0].length
+  }
+  if (lastIndex < line.length) parts.push(line.slice(lastIndex))
+  return parts.length ? parts : [' ']
+}
+
+const EVIDENCE_TIERS = {
+  systematic_review: { label: 'Systematic Review / Meta-Analysis', color: '#065f46', bg: '#d1fae5' },
+  rct: { label: 'RCT', color: '#1e40af', bg: '#dbeafe' },
+  observational: { label: 'Observational Study', color: '#92400e', bg: '#fef3c7' },
+  case_report: { label: 'Case Report', color: '#9a3412', bg: '#ffedd5' },
+  review: { label: 'Review (non-systematic)', color: '#4b5563', bg: '#f3f4f6' },
+  unclassified: { label: 'Not classified', color: '#6b7280', bg: '#f3f4f6' },
+}
+
+function EvidenceTierBadge({ tier }) {
+  const meta = EVIDENCE_TIERS[tier] ?? EVIDENCE_TIERS.unclassified
+  return (
+    <span style={{ ...styles.tierBadge, color: meta.color, background: meta.bg }}>
+      {meta.label}
+    </span>
+  )
+}
+
+function ReferenceList({ citationOrder, paperMap, sourceLabels, ungroundedIds, abstractOnlyIds }) {
+  if (citationOrder.length === 0) return null
+  return (
+    <div style={styles.references}>
+      <div style={styles.reportLabel}>References</div>
+      <ol style={styles.referenceList}>
+        {citationOrder.map((id) => {
+          const paper = paperMap[id]
+          const ungrounded = ungroundedIds.has(id)
+          const abstractOnly = !ungrounded && abstractOnlyIds.has(id)
+          return (
+            <li key={id} id={`ref-${id}`} style={styles.referenceItem}>
+              {paper && <EvidenceTierBadge tier={paper.evidence_tier} />}
+              {paper ? (
+                <>
+                  <a href={paper.url} target="_blank" rel="noreferrer" style={styles.referenceTitle}>
+                    {paper.title || id}
+                  </a>
+                  <span style={styles.referenceMeta}>
+                    {' '}— {paper.authors || 'Unknown authors'}
+                    {paper.year ? ` (${paper.year})` : ''} · {sourceLabels[paper.source] ?? paper.source}
+                  </span>
+                </>
+              ) : (
+                <span style={styles.referenceMeta}>{id} (details unavailable)</span>
+              )}
+              {ungrounded && (
+                <span style={styles.ungroundedNote} title="Cited, but its content was never pulled into the retrieval context used to write the report — treat with extra scrutiny.">
+                  {' '}⚠ not retrieved into context
+                </span>
+              )}
+              {abstractOnly && (
+                <span style={styles.abstractOnlyNote} title="This claim is grounded in the abstract only — full text wasn't available or wasn't fetched, so methodology and effect-size details are unverified.">
+                  {' '}· abstract only
+                </span>
+              )}
+            </li>
+          )
+        })}
+      </ol>
+    </div>
+  )
+}
+
+function ReportBlock({ text, paperMap, sourceLabels, ungroundedIds, abstractOnlyIds }) {
   const lines = text.split('\n')
+  const citationOrder = collectCitationOrder(text)
+  const citationNumbers = Object.fromEntries(citationOrder.map((id, i) => [id, i + 1]))
   return (
     <div style={styles.report}>
       <div style={styles.reportLabel}>Report</div>
@@ -128,9 +245,16 @@ function ReportBlock({ text }) {
           if (line.startsWith('# ')) {
             return <h2 key={i} style={styles.reportH2}>{line.slice(2)}</h2>
           }
-          return <p key={i} style={styles.reportP}>{line || ' '}</p>
+          return <p key={i} style={styles.reportP}>{renderLineWithCitations(line, citationNumbers, i)}</p>
         })}
       </div>
+      <ReferenceList
+        citationOrder={citationOrder}
+        paperMap={paperMap}
+        sourceLabels={sourceLabels}
+        ungroundedIds={ungroundedIds}
+        abstractOnlyIds={abstractOnlyIds}
+      />
     </div>
   )
 }
@@ -143,11 +267,14 @@ export default function App() {
   const [error, setError] = useState(null)
   const [kbCount, setKbCount] = useState(0)
   const [sources, setSources] = useState([])
+  const [paperMap, setPaperMap] = useState({})
+  const [ungroundedIds, setUngroundedIds] = useState(new Set())
+  const [abstractOnlyIds, setAbstractOnlyIds] = useState(new Set())
   const [authed, setAuthed] = useState(null)
   const bottomRef = useRef(null)
 
   useEffect(() => {
-    fetch('/api/kb/count', { headers: authHeaders() })
+    fetch(`${API_BASE}/api/kb/count`, { headers: authHeaders() })
       .then(r => {
         if (r.status === 401) {
           localStorage.removeItem('appPassword')
@@ -159,7 +286,7 @@ export default function App() {
       })
       .then(d => setKbCount(d.count))
       .catch(() => {})
-    fetch('/api/sources', { headers: authHeaders() })
+    fetch(`${API_BASE}/api/sources`, { headers: authHeaders() })
       .then(r => r.json())
       .then(d => setSources(d.sources ?? []))
       .catch(() => {})
@@ -169,8 +296,12 @@ export default function App() {
     return <LoginGate onAuthed={() => setAuthed(true)} />
   }
 
+  const sourceLabels = Object.fromEntries(sources.map(s => [s.key, s.label]))
+
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (events.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
   }, [events])
 
   function appendText(delta) {
@@ -190,9 +321,12 @@ export default function App() {
     setRunning(true)
     setError(null)
     setEvents([])
+    setPaperMap({})
+    setUngroundedIds(new Set())
+    setAbstractOnlyIds(new Set())
 
     try {
-      const resp = await fetch('/api/research', {
+      const resp = await fetch(`${API_BASE}/api/research`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ question, domain }),
@@ -231,6 +365,15 @@ export default function App() {
           } else if (data.type === 'rag_store') {
             setEvents(prev => [...prev, { type: 'rag_store', chunks_added: data.chunks_added, ids: data.ids }])
             setKbCount(c => c + data.chunks_added)
+          } else if (data.type === 'references') {
+            setPaperMap(prev => {
+              const next = { ...prev }
+              for (const p of data.papers) next[p.id] = p
+              return next
+            })
+          } else if (data.type === 'grounding') {
+            setUngroundedIds(new Set(data.ungrounded_ids))
+            setAbstractOnlyIds(new Set(data.abstract_only_ids))
           } else if (data.type === 'error') {
             setError(data.message)
           } else if (data.type === 'done') {
@@ -302,7 +445,18 @@ export default function App() {
               if (ev.type === 'tool_call') return <ToolCallCard key={i} event={ev} />
               if (ev.type === 'tool_result') return <ToolResultCard key={i} event={ev} />
               if (ev.type === 'rag_store') return <RagStoreCard key={i} event={ev} />
-              if (ev.type === 'text') return <ReportBlock key={i} text={ev.text} />
+              if (ev.type === 'text') {
+                return (
+                  <ReportBlock
+                    key={i}
+                    text={ev.text}
+                    paperMap={paperMap}
+                    sourceLabels={sourceLabels}
+                    ungroundedIds={ungroundedIds}
+                    abstractOnlyIds={abstractOnlyIds}
+                  />
+                )
+              }
               return null
             })}
             {running && <div style={styles.cursor}>▍</div>}
@@ -523,6 +677,56 @@ const styles = {
     lineHeight: 1.7,
     color: '#222',
     margin: '4px 0',
+  },
+  citation: {
+    fontSize: 12,
+  },
+  citationLink: {
+    color: '#2563eb',
+    textDecoration: 'none',
+  },
+  references: {
+    marginTop: 20,
+    paddingTop: 16,
+    borderTop: '1px solid #e5e7eb',
+  },
+  referenceList: {
+    margin: 0,
+    paddingLeft: 20,
+  },
+  referenceItem: {
+    fontSize: 13.5,
+    lineHeight: 1.6,
+    color: '#333',
+    marginBottom: 6,
+  },
+  referenceTitle: {
+    color: '#1e40af',
+    textDecoration: 'none',
+    fontWeight: 500,
+  },
+  referenceMeta: {
+    color: '#6b7280',
+  },
+  ungroundedNote: {
+    color: '#b45309',
+    fontSize: 12,
+    fontWeight: 500,
+  },
+  abstractOnlyNote: {
+    color: '#6b7280',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
+  tierBadge: {
+    display: 'inline-block',
+    fontSize: 10.5,
+    fontWeight: 600,
+    padding: '1px 7px',
+    borderRadius: 10,
+    marginRight: 7,
+    whiteSpace: 'nowrap',
+    verticalAlign: 'middle',
   },
   cursor: {
     color: '#2563eb',

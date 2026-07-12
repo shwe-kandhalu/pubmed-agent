@@ -1,0 +1,6 @@
+{"id": "metformin-cancer", "question": "does metformin reduce cancer risk in type 2 diabetics", "domain": "oncology", "expected_pubmed_ids": ["26177483", "35512976", "35640743"]}
+{"id": "statins-diabetes", "question": "do statins increase the risk of new-onset diabetes", "domain": "cardiology", "expected_pubmed_ids": ["28416099", "28927706", "36031810"]}
+{"id": "crispr-offtarget", "question": "what are the off-target effects of CRISPR base editing", "domain": "genetics", "expected_pubmed_ids": ["30684591", "27699445", "40119516"]}
+{"id": "exercise-depression", "question": "does exercise reduce risk of depression in older adults", "domain": "psychiatry", "expected_pubmed_ids": ["9624662", "25514304", "36595284"]}
+{"id": "vitamind-bone", "question": "does vitamin D supplementation improve bone density in postmenopausal women", "domain": "endocrinology", "expected_pubmed_ids": ["32564438", "29337906", "30115856"]}
+{"id": "microbiome-autoimmune", "question": "how does the gut microbiome influence autoimmune disease", "domain": "immunology", "expected_pubmed_ids": ["32545596", "37505311", "31753762"]}

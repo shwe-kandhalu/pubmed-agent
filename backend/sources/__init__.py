@@ -33,3 +33,19 @@ def group_by_source(ids: list[str]) -> dict[str, list[str]]:
         source, native_id = parse_id(full_id)
         groups.setdefault(source, []).append(native_id)
     return groups
+
+
+def paper_url(source: str, native_id: str, doi: str = "") -> str:
+    if doi:
+        return f"https://doi.org/{doi}"
+    if source == "pubmed":
+        return f"https://pubmed.ncbi.nlm.nih.gov/{native_id}/"
+    if source == "semantic_scholar":
+        return f"https://www.semanticscholar.org/paper/{native_id}"
+    if source == "openalex":
+        return f"https://openalex.org/{native_id}"
+    if source == "europepmc":
+        return f"https://europepmc.org/article/MED/{native_id}"
+    if source == "crossref":
+        return f"https://doi.org/{native_id}"
+    return ""

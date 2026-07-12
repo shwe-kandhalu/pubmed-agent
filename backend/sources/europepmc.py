@@ -2,7 +2,7 @@
 supports open-access full text for many PMC-indexed articles."""
 import requests
 
-from .common import parse_jats_xml
+from .common import classify_evidence_tier, parse_jats_xml
 
 KEY = "europepmc"
 LABEL = "Europe PMC"
@@ -20,6 +20,7 @@ def search(query: str, max_results: int = 8) -> list[dict]:
     resp.raise_for_status()
     papers = []
     for doc in resp.json().get("resultList", {}).get("result", []):
+        pub_types = [t.strip() for t in doc.get("pubType", "").split(";") if t.strip()]
         papers.append({
             "id": f"{KEY}:{doc['id']}",
             "source": KEY,
@@ -27,6 +28,7 @@ def search(query: str, max_results: int = 8) -> list[dict]:
             "authors": doc.get("authorString", ""),
             "year": doc.get("pubYear", ""),
             "doi": doc.get("doi", ""),
+            "evidence_tier": classify_evidence_tier(pub_types),
         })
     return papers
 

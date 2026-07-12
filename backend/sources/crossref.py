@@ -34,6 +34,7 @@ def search(query: str, max_results: int = 8) -> list[dict]:
             "authors": authors,
             "year": year,
             "doi": doc["DOI"],
+            "evidence_tier": "unclassified",
         })
     return papers
 
