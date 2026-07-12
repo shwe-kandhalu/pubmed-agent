@@ -292,17 +292,17 @@ export default function App() {
       .catch(() => {})
   }, [])
 
-  if (authed === false) {
-    return <LoginGate onAuthed={() => setAuthed(true)} />
-  }
-
-  const sourceLabels = Object.fromEntries(sources.map(s => [s.key, s.label]))
-
   useEffect(() => {
     if (events.length > 0) {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [events])
+
+  if (authed === false) {
+    return <LoginGate onAuthed={() => setAuthed(true)} />
+  }
+
+  const sourceLabels = Object.fromEntries(sources.map(s => [s.key, s.label]))
 
   function appendText(delta) {
     setEvents(prev => {
