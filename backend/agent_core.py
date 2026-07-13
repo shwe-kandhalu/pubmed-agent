@@ -1,6 +1,7 @@
 import anthropic
 import asyncio
 import json
+import os
 import re
 import time
 import uuid
@@ -13,6 +14,8 @@ from sources import SOURCES, DEFAULT_SEARCH_SOURCES, group_by_source, source_lis
 
 load_dotenv()
 
+MOCK_MODE = os.environ.get("MOCK_MODE") == "true"
+
 _CITATION_ID = re.compile(
     r"(?:" + "|".join(re.escape(k) for k in SOURCES) + r"):[^\s,;()]+"
 )
@@ -23,8 +26,8 @@ TOOLS = [
         "description": (
             "Search academic literature for papers matching a query, across one or more sources. "
             f"Available sources: {', '.join(m.KEY for m in SOURCES.values())}. "
-            f"If omitted, searches the default set ({', '.join(DEFAULT_SEARCH_SOURCES)}) — 'crossref' is "
-            "metadata/DOI-focused and best added explicitly when you need citation verification. "
+            f"If omitted, searches the default set ({', '.join(DEFAULT_SEARCH_SOURCES)}). "
+            "'crossref' is metadata/DOI-focused and best added explicitly when you need citation verification. "
             "Returns normalized paper stubs (id, title, authors, year, doi) per source. "
             "Search iteratively with different queries if initial results are sparse or off-topic."
         ),
@@ -96,7 +99,7 @@ SYSTEM = """You are a scientific literature review assistant. You help researche
 Workflow:
 1. Search literature iteratively (up to 3 searches) to find relevant papers, across sources. Refine queries if initial results are sparse. Prefer combining sources for broader coverage; add 'crossref' explicitly only if you need DOI/metadata verification.
 2. Fetch abstracts to screen for relevance. Papers are automatically indexed in a vector knowledge base as you fetch them.
-3. Fetch full text for the 2–3 most relevant papers. Note that full article text is only retrievable for open-access PubMed/PMC and Europe PMC papers — other sources may only yield an open-access link.
+3. Fetch full text for the 2-3 most relevant papers. Note that full article text is only retrievable for open-access PubMed/PMC and Europe PMC papers. Other sources may only yield an open-access link.
 4. Call retrieve_relevant_context with the original research question to pull the most pertinent indexed content.
 5. Write a comprehensive literature review grounded in the retrieved content.
 
@@ -140,7 +143,7 @@ def fetch_abstracts(ids: list[str], run_id: str) -> str:
         try:
             text, covered = mod.fetch_abstracts(native_ids)
         except Exception as e:
-            parts.append(f"[{source_key}] failed to fetch abstracts — {e}")
+            parts.append(f"[{source_key}] failed to fetch abstracts: {e}")
             continue
         if text:
             rag.store_batch(covered, text, run_id)
@@ -159,7 +162,7 @@ def fetch_full_text(ids: list[str], run_id: str) -> str:
         try:
             results = mod.fetch_full_text(native_ids)
         except Exception as e:
-            parts.append(f"[{source_key}] failed to fetch full text — {e}")
+            parts.append(f"[{source_key}] failed to fetch full text: {e}")
             continue
         for r in results:
             if "text" in r:
@@ -203,14 +206,83 @@ def _sse(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
 
 
-async def run_agent_streaming(question: str, domain: str = "") -> AsyncGenerator[str, None]:
-    client = anthropic.AsyncAnthropic()
+_MOCK_PAPERS = [
+    {"id": "pubmed:90000001", "source": "pubmed", "title": "Mock Systematic Review of Widget Efficacy",
+     "authors": "A. Researcher, B. Scholar", "year": "2024", "doi": "",
+     "evidence_tier": "systematic_review", "url": "https://pubmed.ncbi.nlm.nih.gov/90000001/"},
+    {"id": "pubmed:90000002", "source": "pubmed", "title": "A Randomized Trial of Widgets in Adults",
+     "authors": "C. Trialist", "year": "2023", "doi": "",
+     "evidence_tier": "rct", "url": "https://pubmed.ncbi.nlm.nih.gov/90000002/"},
+    {"id": "openalex:W900000003", "source": "openalex", "title": "Widget Outcomes: An OpenAlex-Indexed Study",
+     "authors": "D. Analyst", "year": "2022", "doi": "",
+     "evidence_tier": "unclassified", "url": "https://openalex.org/W900000003"},
+    {"id": "europepmc:90000004", "source": "europepmc", "title": "Observational Cohort of Widget Use",
+     "authors": "E. Cohort, F. Watcher", "year": "2021", "doi": "",
+     "evidence_tier": "observational", "url": "https://europepmc.org/article/MED/90000004"},
+    {"id": "pubmed:90000005", "source": "pubmed", "title": "A Case Report of Widget-Related Adverse Event",
+     "authors": "G. Clinician", "year": "2020", "doi": "",
+     "evidence_tier": "case_report", "url": "https://pubmed.ncbi.nlm.nih.gov/90000005/"},
+]
+
+_MOCK_REPORT = """## Key Findings
+Widgets show a consistent positive effect on outcome measures across study designs (pubmed:90000001, pubmed:90000002). Effect sizes are largest in controlled trial settings (pubmed:90000002) and more modest in observational cohorts (europepmc:90000004).
+
+## Common Themes
+Across sources, higher widget dosage correlates with stronger response (openalex:W900000003). One case report describes a rare adverse event worth monitoring (pubmed:90000005).
+
+## Implications
+Clinicians should consider widget dosage titration based on patient response, with awareness of the rare adverse event profile (pubmed:90000005).
+
+## Research Gaps
+Long-term outcomes beyond 12 months remain understudied, and no trial has directly compared widget formulations head-to-head (pubmed:90000002)."""
+
+
+async def _mock_run(question: str) -> AsyncGenerator[str, None]:
+    """Streams a canned run with no Claude/API calls, for testing the UI without spending credits.
+    Enable with MOCK_MODE=true in the backend's environment."""
+    steps = [
+        {"type": "tool_call", "name": "search_literature", "input": {"query": question, "sources": DEFAULT_SEARCH_SOURCES}},
+        {"type": "references", "papers": _MOCK_PAPERS},
+        {"type": "tool_result", "name": "search_literature", "result": "Found 5 mock papers across 4 sources."},
+        {"type": "tool_call", "name": "fetch_abstracts", "input": {"ids": [p["id"] for p in _MOCK_PAPERS]}},
+        {"type": "rag_store", "chunks_added": 5, "ids": [p["id"] for p in _MOCK_PAPERS]},
+        {"type": "tool_result", "name": "fetch_abstracts", "result": "Fetched 5 abstracts."},
+        {"type": "tool_call", "name": "fetch_full_text", "input": {"ids": ["pubmed:90000001", "pubmed:90000002"]}},
+        {"type": "rag_store", "chunks_added": 2, "ids": ["pubmed:90000001", "pubmed:90000002"]},
+        {"type": "tool_result", "name": "fetch_full_text", "result": "Fetched full text for 2 papers."},
+        {"type": "tool_call", "name": "retrieve_relevant_context", "input": {"query": question}},
+        {"type": "tool_result", "name": "retrieve_relevant_context", "result": "Retrieved 4 relevant chunks."},
+    ]
+    for step in steps:
+        yield _sse(step)
+        await asyncio.sleep(0.3)
+
+    for i in range(0, len(_MOCK_REPORT), 40):
+        yield _sse({"type": "text_delta", "text": _MOCK_REPORT[i : i + 40]})
+        await asyncio.sleep(0.03)
+
+    yield _sse({
+        "type": "grounding",
+        "cited_ids": [p["id"] for p in _MOCK_PAPERS],
+        "ungrounded_ids": ["pubmed:90000005"],
+        "abstract_only_ids": ["openalex:W900000003", "europepmc:90000004"],
+    })
+    yield _sse({"type": "done"})
+
+
+async def run_agent_streaming(question: str, user_api_key: str | None = None) -> AsyncGenerator[str, None]:
+    # A visitor-supplied key always means "give me the real thing," even if this deployment
+    # otherwise defaults to mock mode for anyone who hasn't brought their own key.
+    if MOCK_MODE and not user_api_key:
+        async for chunk in _mock_run(question):
+            yield chunk
+        return
+
+    client = anthropic.AsyncAnthropic(api_key=user_api_key) if user_api_key else anthropic.AsyncAnthropic()
     system = SYSTEM
-    if domain:
-        system += f"\n\nThe user is working in the field of: {domain}."
 
     run_id = uuid.uuid4().hex
-    trace = RunTrace(run_id, question, domain)
+    trace = RunTrace(run_id, question)
     messages = [{"role": "user", "content": question}]
     MAX_STEPS = 12
     paper_registry: dict[str, dict] = {}

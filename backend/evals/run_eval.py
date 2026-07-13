@@ -1,11 +1,11 @@
 """Eval harness for the literature review agent.
 
 Three layers:
-  A. Trajectory checks   — deterministic assertions on agent behavior (search budget, retrieval
+  A. Trajectory checks  : deterministic assertions on agent behavior (search budget, retrieval
                             before synthesis, groundedness, format compliance). From a live run's trace.
-  B. Retrieval recall@k  — does search_literature's PubMed results surface the same papers PubMed's
+  B. Retrieval recall@k : does search_literature's PubMed results surface the same papers PubMed's
                             own relevance ranking returns for that query? No LLM cost, no agent run.
-  C. LLM-judge quality    — a second Claude call scores the final report against a rubric.
+  C. LLM-judge quality   : a second Claude call scores the final report against a rubric.
 
 Usage:
   python evals/run_eval.py               # layer B only (fast, free)
@@ -59,7 +59,7 @@ def load_golden_set() -> list[dict]:
 
 
 def eval_retrieval(entry: dict, k: int = 10) -> dict:
-    """Layer B: no agent, no LLM — just checks the PubMed source adapter's own recall."""
+    """Layer B: no agent, no LLM: just checks the PubMed source adapter's own recall."""
     results = pubmed.search(entry["question"], max_results=k)
     returned_ids = {p["id"].split(":", 1)[1] for p in results}
     expected = set(entry["expected_pubmed_ids"])
@@ -72,9 +72,9 @@ def eval_retrieval(entry: dict, k: int = 10) -> dict:
     }
 
 
-async def run_agent_and_collect(question: str, domain: str) -> dict:
+async def run_agent_and_collect(question: str) -> dict:
     events, report_text = [], ""
-    async for chunk in agent_core.run_agent_streaming(question, domain):
+    async for chunk in agent_core.run_agent_streaming(question):
         for line in chunk.split("\n\n"):
             if not line.startswith("data: "):
                 continue
@@ -108,7 +108,7 @@ def eval_trajectory(run: dict) -> dict:
         "word_count": word_count,
         "cited_count": len(grounding["cited_ids"]) if grounding else 0,
         "ungrounded_count": len(grounding["ungrounded_ids"]) if grounding else 0,
-        # Informational, not a failing check — abstract-only citations are expected for paywalled papers.
+        # Informational, not a failing check: abstract-only citations are expected for paywalled papers.
         "abstract_only_count": len(grounding["abstract_only_ids"]) if grounding else 0,
         "missing_sections": missing_sections,
         "checks": checks,
@@ -130,7 +130,7 @@ async def eval_judge(report_text: str) -> dict:
 
 
 async def eval_full(entry: dict) -> dict:
-    run = await run_agent_and_collect(entry["question"], entry["domain"])
+    run = await run_agent_and_collect(entry["question"])
     trajectory = eval_trajectory(run)
     judge = await eval_judge(run["report_text"]) if run["report_text"] else {"error": "empty report"}
     return {"id": entry["id"], "trajectory": trajectory, "judge": judge}

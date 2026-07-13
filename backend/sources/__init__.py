@@ -1,5 +1,5 @@
 """Registry of literature sources. Each module exposes KEY, LABEL, search(), fetch_abstracts(),
-and fetch_full_text() with a uniform signature — add a new source by writing a module with that
+and fetch_full_text() with a uniform signature: add a new source by writing a module with that
 shape and registering it below."""
 from . import crossref, europepmc, openalex, pubmed, semantic_scholar
 

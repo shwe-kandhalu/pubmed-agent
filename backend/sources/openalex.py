@@ -1,5 +1,5 @@
 """OpenAlex source. Free, open catalog. Anonymous search is heavily rate-limited (OpenAlex now
-returns 503s under load without one) — set OPENALEX_API_KEY (free, from openalex.org) for reliable
+returns 503s under load without one): set OPENALEX_API_KEY (free, from openalex.org) for reliable
 access, and optionally OPENALEX_MAILTO to also join the 'polite pool'."""
 import os
 
@@ -66,7 +66,7 @@ def fetch_abstracts(work_ids: list[str]) -> tuple[str, list[str]]:
             resp = request_with_retry("GET", f"{_WORKS}/{work_id}", params=_params({}), timeout=10)
             doc = resp.json()
         except Exception as e:
-            parts.append(f"{work_id}: failed to fetch — {e}")
+            parts.append(f"{work_id}: failed to fetch: {e}")
             continue
         authors = ", ".join(
             (a.get("author") or {}).get("display_name", "") for a in (doc.get("authorships") or [])[:3]
@@ -88,7 +88,7 @@ def fetch_full_text(work_ids: list[str]) -> list[dict]:
             resp = request_with_retry("GET", f"{_WORKS}/{work_id}", params=_params({}), timeout=10)
             doc = resp.json()
         except Exception as e:
-            results.append({"id": composite_id, "error": f"failed to fetch — {e}"})
+            results.append({"id": composite_id, "error": f"failed to fetch: {e}"})
             continue
         oa_url = (doc.get("open_access") or {}).get("oa_url") or (doc.get("best_oa_location") or {}).get("pdf_url")
         if oa_url:

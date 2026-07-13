@@ -19,6 +19,6 @@ def enforce_rate_limit(request: Request) -> None:
     if len(hits) >= _MAX_REQUESTS:
         raise HTTPException(
             status_code=429,
-            detail=f"Too many requests — max {_MAX_REQUESTS} searches per {_WINDOW_SECONDS}s. Please wait a moment.",
+            detail=f"Too many requests: max {_MAX_REQUESTS} searches per {_WINDOW_SECONDS}s. Please wait a moment.",
         )
     hits.append(now)

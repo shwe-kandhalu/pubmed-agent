@@ -75,5 +75,5 @@ def fetch_full_text(ext_ids: list[str]) -> list[dict]:
             parsed = parse_jats_xml(f"Europe PMC {ext_id} ({pmcid})", resp.text)
             results.append({"id": composite_id, "text": parsed})
         except Exception as e:
-            results.append({"id": composite_id, "error": f"failed to fetch full text — {e}"})
+            results.append({"id": composite_id, "error": f"failed to fetch full text: {e}"})
     return results

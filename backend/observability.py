@@ -1,5 +1,5 @@
-"""Structured run tracing. Writes one JSON line per research run to logs/runs.jsonl —
-backend-only, not surfaced in the frontend. Doubles as input for the eval harness's
+"""Structured run tracing. Writes one JSON line per research run to logs/runs.jsonl.
+Backend-only, not surfaced in the frontend. Doubles as input for the eval harness's
 deterministic trajectory checks (search count, whether retrieval grounded the report, etc)."""
 import json
 import os
@@ -9,10 +9,9 @@ _LOG_PATH = os.path.join(os.path.dirname(__file__), "logs", "runs.jsonl")
 
 
 class RunTrace:
-    def __init__(self, run_id: str, question: str, domain: str = ""):
+    def __init__(self, run_id: str, question: str):
         self.run_id = run_id
         self.question = question
-        self.domain = domain
         self._started = time.monotonic()
         self.wall_started_at = time.time()
         self.model_calls: list[dict] = []
@@ -44,7 +43,6 @@ class RunTrace:
         record = {
             "run_id": self.run_id,
             "question": self.question,
-            "domain": self.domain,
             "started_at": self.wall_started_at,
             "duration_s": round(time.monotonic() - self._started, 3),
             "stop_reason": stop_reason,

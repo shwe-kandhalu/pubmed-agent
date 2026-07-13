@@ -1,19 +1,21 @@
 import os
 import sys
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from agent_core import run_agent_streaming
+from agent_core import run_agent_streaming, MOCK_MODE
 from auth import require_auth
 from rate_limit import enforce_rate_limit
 import rag
 from sources import source_list
 
-if not os.environ.get("APP_PASSWORD"):
+# In mock-by-default deployments (MOCK_MODE=true, no server-side spend unless a visitor brings
+# their own key), an open APP_PASSWORD is the intended design, not a footgun — only warn otherwise.
+if not os.environ.get("APP_PASSWORD") and not MOCK_MODE:
     print(
-        "WARNING: APP_PASSWORD is not set — /api/research is open to anyone who can reach this "
+        "WARNING: APP_PASSWORD is not set: /api/research is open to anyone who can reach this "
         "server, and every request spends real Anthropic API credits. Set APP_PASSWORD before "
         "deploying anywhere publicly reachable.",
         file=sys.stderr,
@@ -35,13 +37,12 @@ app.add_middleware(
 
 class ResearchRequest(BaseModel):
     question: str
-    domain: str = ""
 
 
 @app.post("/api/research", dependencies=[Depends(enforce_rate_limit)])
-async def research(body: ResearchRequest):
+async def research(body: ResearchRequest, x_user_api_key: str | None = Header(default=None)):
     return StreamingResponse(
-        run_agent_streaming(body.question, body.domain),
+        run_agent_streaming(body.question, user_api_key=x_user_api_key or None),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
@@ -55,3 +56,8 @@ async def kb_count():
 @app.get("/api/sources")
 async def sources():
     return {"sources": source_list()}
+
+
+@app.get("/api/mode")
+async def mode():
+    return {"mock_mode": MOCK_MODE}

@@ -35,7 +35,7 @@ EVIDENCE_TIER_LABELS = {
 
 def classify_evidence_tier(pub_types: list[str]) -> str:
     """Classify a paper's evidence strength from its publication-type tags. Only call this with
-    real controlled-vocabulary tags (MEDLINE PublicationType, JATS article-type) — never infer
+    real controlled-vocabulary tags (MEDLINE PublicationType, JATS article-type): never infer
     this from abstract text, since a wrong tier reads as a false confidence signal."""
     normalized = {t.strip().lower() for t in pub_types if t}
     if normalized & _SYSTEMATIC_REVIEW_TERMS:
@@ -83,7 +83,7 @@ def parse_jats_xml(label: str, xml_text: str) -> str:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
-        return f"{label}: XML parse error — {e}"
+        return f"{label}: XML parse error: {e}"
 
     parts = [f"=== {label} ==="]
     title_el = root.find(".//article-title")
