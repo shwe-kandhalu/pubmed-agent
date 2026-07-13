@@ -440,11 +440,12 @@ export default function App() {
   const bottomRef = useRef(null)
 
   useEffect(() => {
+    if (!authed) return
     fetch(`${API_BASE}/api/mode`, { headers: authHeaders() })
       .then(r => r.json())
       .then(d => setMockMode(!!d.mock_mode))
       .catch(() => {})
-  }, [])
+  }, [authed])
 
   function saveApiKey() {
     const trimmed = keyDraft.trim()
