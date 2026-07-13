@@ -1,5 +1,7 @@
 # Literature Review Agent
 
+**Live demo:** https://litreview-agent-five.vercel.app
+
 An AI agent that searches multiple literature databases for a research question, screens abstracts and full text, and summarizes key findings, themes, and research gaps. It verifies that every citation was actually retrieved (not just found in search) and grades each paper's evidence strength (systematic review, RCT, observational study, etc.).
 
 ## How it works
