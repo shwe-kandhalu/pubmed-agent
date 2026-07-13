@@ -431,6 +431,7 @@ export default function App() {
   const [paperMap, setPaperMap] = useState({})
   const [ungroundedIds, setUngroundedIds] = useState(new Set())
   const [abstractOnlyIds, setAbstractOnlyIds] = useState(new Set())
+  const [sessionId, setSessionId] = useState(null)
   const [authed, setAuthed] = useState(null)
   const [mockMode, setMockMode] = useState(false)
   const [userApiKey, setUserApiKey] = useState(() => localStorage.getItem('userAnthropicKey') || '')
@@ -504,22 +505,39 @@ export default function App() {
     })
   }
 
-  async function handleSubmit(e) {
-    e.preventDefault()
-    if (!question.trim() || running) return
-
-    setRunning(true)
-    setError(null)
+  function startNewSearch() {
+    setSessionId(null)
     setEvents([])
     setPaperMap({})
     setUngroundedIds(new Set())
     setAbstractOnlyIds(new Set())
+    setQuestion('')
+    setError(null)
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (!question.trim() || running) return
+
+    const isFollowUp = !!sessionId
+    setRunning(true)
+    setError(null)
+    if (isFollowUp) {
+      setEvents(prev => [...prev, { type: 'question', text: question }])
+    } else {
+      setEvents([])
+      setPaperMap({})
+      setUngroundedIds(new Set())
+      setAbstractOnlyIds(new Set())
+    }
+    const askedQuestion = question
+    setQuestion('')
 
     try {
       const resp = await fetch(`${API_BASE}/api/research`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders(), ...userKeyHeaders() },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question: askedQuestion, session_id: sessionId }),
       })
 
       if (resp.status === 401) {
@@ -546,7 +564,9 @@ export default function App() {
           let data
           try { data = JSON.parse(line.slice(6)) } catch { continue }
 
-          if (data.type === 'text_delta') {
+          if (data.type === 'session') {
+            setSessionId(data.session_id)
+          } else if (data.type === 'text_delta') {
             appendText(data.text)
           } else if (data.type === 'tool_call') {
             setEvents(prev => [...prev, { type: 'tool_call', name: data.name, input: data.input }])
@@ -562,8 +582,10 @@ export default function App() {
               return next
             })
           } else if (data.type === 'grounding') {
-            setUngroundedIds(new Set(data.ungrounded_ids))
-            setAbstractOnlyIds(new Set(data.abstract_only_ids))
+            // Merge, not replace — earlier turns' citation flags must survive a follow-up,
+            // since this event only reports on the ids cited in *this* turn's new text.
+            setUngroundedIds(prev => new Set([...prev, ...data.ungrounded_ids]))
+            setAbstractOnlyIds(prev => new Set([...prev, ...data.abstract_only_ids]))
           } else if (data.type === 'error') {
             setError(data.message)
           } else if (data.type === 'done') {
@@ -601,11 +623,17 @@ export default function App() {
         </div>
       </div>
 
-      <div style={{ ...styles.main, justifyContent: isEmptyState ? 'center' : 'flex-start' }}>
+      <div
+        style={{
+          ...styles.main,
+          justifyContent: isEmptyState ? 'center' : 'flex-start',
+          paddingBottom: view === 'search' && events.length > 0 ? 90 : 40,
+        }}
+      >
         <div style={styles.container}>
           {view === 'how' ? (
             <HowItWorks />
-          ) : (
+          ) : events.length === 0 ? (
             <>
               <div style={styles.header}>
                 <div style={styles.titleBlock}>
@@ -632,7 +660,7 @@ export default function App() {
                     style={styles.input}
                     value={question}
                     onChange={e => setQuestion(e.target.value)}
-                    placeholder={isEmptyState && typedPlaceholder ? typedPlaceholder : 'Ask a research question...'}
+                    placeholder={typedPlaceholder || 'Ask a research question...'}
                     disabled={running}
                   />
                   <button
@@ -676,98 +704,136 @@ export default function App() {
                 </div>
               )}
 
-              {isEmptyState && (
+              <div
+                style={styles.marqueeOuter}
+                onMouseEnter={() => setMarqueePaused(true)}
+                onMouseLeave={() => setMarqueePaused(false)}
+              >
+                <style>{`
+                  @keyframes example-marquee {
+                    from { transform: translateX(0); }
+                    to { transform: translateX(-50%); }
+                  }
+                `}</style>
                 <div
-                  style={styles.marqueeOuter}
-                  onMouseEnter={() => setMarqueePaused(true)}
-                  onMouseLeave={() => setMarqueePaused(false)}
+                  style={{
+                    ...styles.marqueeTrack,
+                    animationPlayState: marqueePaused ? 'paused' : 'running',
+                  }}
                 >
-                  <style>{`
-                    @keyframes example-marquee {
-                      from { transform: translateX(0); }
-                      to { transform: translateX(-50%); }
-                    }
-                  `}</style>
-                  <div
-                    style={{
-                      ...styles.marqueeTrack,
-                      animationPlayState: marqueePaused ? 'paused' : 'running',
-                    }}
-                  >
-                    {[...CHIP_EXAMPLES, ...CHIP_EXAMPLES].map((ex, i) => (
-                      <button
-                        key={i}
-                        type="button"
-                        style={styles.exampleChip}
-                        onClick={() => setQuestion(ex)}
-                      >
-                        {ex}
-                      </button>
-                    ))}
-                  </div>
+                  {[...CHIP_EXAMPLES, ...CHIP_EXAMPLES].map((ex, i) => (
+                    <button
+                      key={i}
+                      type="button"
+                      style={styles.exampleChip}
+                      onClick={() => setQuestion(ex)}
+                    >
+                      {ex}
+                    </button>
+                  ))}
                 </div>
-              )}
+              </div>
 
-              {isEmptyState && (
-                <div style={styles.featureRow}>
-                  <div style={styles.featureCard}>
-                    <h3 style={styles.featureTitle}>Search</h3>
-                    <p style={styles.featureText}>Find relevant papers from multiple scientific databases.</p>
-                  </div>
-                  <div style={styles.featureCard}>
-                    <h3 style={styles.featureTitle}>Synthesize</h3>
-                    <p style={styles.featureText}>Generate a concise, evidence-based literature review.</p>
-                  </div>
-                  <div style={styles.featureCard}>
-                    <h3 style={styles.featureTitle}>Cite</h3>
-                    <p style={styles.featureText}>Every statement links back to the original research.</p>
-                  </div>
+              <div style={styles.featureRow}>
+                <div style={styles.featureCard}>
+                  <h3 style={styles.featureTitle}>Search</h3>
+                  <p style={styles.featureText}>Find relevant papers from multiple scientific databases.</p>
                 </div>
-              )}
+                <div style={styles.featureCard}>
+                  <h3 style={styles.featureTitle}>Synthesize</h3>
+                  <p style={styles.featureText}>Generate a concise, evidence-based literature review.</p>
+                </div>
+                <div style={styles.featureCard}>
+                  <h3 style={styles.featureTitle}>Cite</h3>
+                  <p style={styles.featureText}>Every statement links back to the original research.</p>
+                </div>
+              </div>
+
+              {error && <div style={styles.error}>{error}</div>}
+            </>
+          ) : (
+            <>
+              <div style={styles.chatTopRow}>
+                <span style={styles.chatHeaderTitle}>Literature Review Agent</span>
+                <button type="button" style={styles.newSearchLink} onClick={startNewSearch}>
+                  New search
+                </button>
+              </div>
+
+              <div style={styles.feed}>
+                {events.map((ev, i) => {
+                  if (ev.type === 'question') return <div key={i} style={styles.followUpQuestion}>{ev.text}</div>
+                  if (ev.type === 'tool_call') return <ToolCallCard key={i} event={ev} sourceLabels={sourceLabels} />
+                  if (ev.type === 'tool_result') return <ToolResultCard key={i} event={ev} />
+                  if (ev.type === 'rag_store') return <RagStoreCard key={i} event={ev} />
+                  if (ev.type === 'text') {
+                    return (
+                      <ReportBlock
+                        key={i}
+                        text={ev.text}
+                        paperMap={paperMap}
+                        sourceLabels={sourceLabels}
+                        ungroundedIds={ungroundedIds}
+                        abstractOnlyIds={abstractOnlyIds}
+                      />
+                    )
+                  }
+                  return null
+                })}
+                {running && <div style={styles.cursor}>▍</div>}
+                <div ref={bottomRef} />
+              </div>
 
               {error && <div style={styles.error}>{error}</div>}
 
-              {events.length > 0 && (
-                <div style={styles.feed}>
-                  {events.map((ev, i) => {
-                    if (ev.type === 'tool_call') return <ToolCallCard key={i} event={ev} sourceLabels={sourceLabels} />
-                    if (ev.type === 'tool_result') return <ToolResultCard key={i} event={ev} />
-                    if (ev.type === 'rag_store') return <RagStoreCard key={i} event={ev} />
-                    if (ev.type === 'text') {
-                      return (
-                        <ReportBlock
-                          key={i}
-                          text={ev.text}
-                          paperMap={paperMap}
-                          sourceLabels={sourceLabels}
-                          ungroundedIds={ungroundedIds}
-                          abstractOnlyIds={abstractOnlyIds}
-                        />
-                      )
-                    }
-                    return null
-                  })}
-                  {running && <div style={styles.cursor}>▍</div>}
+              {mockMode && !userApiKey && (
+                <div style={styles.keyNotice}>
+                  Demo mode — showing mock results, no API calls made.{' '}
+                  <button type="button" style={styles.keyNoticeLink} onClick={() => setShowKeyInput(true)}>
+                    Use your own Anthropic API key
+                  </button>
                 </div>
               )}
             </>
           )}
-
-          <div ref={bottomRef} />
         </div>
       </div>
 
-      <footer style={styles.footer}>
-        <span>© 2026 Literature Review Agent</span>
-        <a
-          href="https://github.com/shwe-kandhalu/litreview_agent"
-          target="_blank"
-          rel="noreferrer"
-          style={styles.footerLink}
-        >
-          GitHub
-        </a>
-      </footer>
+      {view === 'search' && events.length > 0 && (
+        <div style={styles.stickyBar}>
+          <form onSubmit={handleSubmit} style={styles.stickyBarForm}>
+            <input
+              style={styles.input}
+              value={question}
+              onChange={e => setQuestion(e.target.value)}
+              placeholder="Ask a follow-up about this report..."
+              disabled={running}
+              autoFocus
+            />
+            <button
+              style={{ ...styles.button, opacity: running ? 0.6 : 1 }}
+              type="submit"
+              disabled={running}
+            >
+              {running ? 'Running…' : 'Ask'}
+            </button>
+          </form>
+        </div>
+      )}
+
+      {!(view === 'search' && events.length > 0) && (
+        <footer style={styles.footer}>
+          <span>© 2026 Literature Review Agent</span>
+          <a
+            href="https://github.com/shwe-kandhalu/litreview_agent"
+            target="_blank"
+            rel="noreferrer"
+            style={styles.footerLink}
+          >
+            GitHub
+          </a>
+        </footer>
+      )}
     </div>
   )
 }
@@ -1023,6 +1089,27 @@ const styles = {
     textTransform: 'uppercase',
     letterSpacing: '0.04em',
   },
+  newSearchLink: {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    fontSize: 12.5,
+    fontWeight: 600,
+    color: '#6b2737',
+    cursor: 'pointer',
+    textDecoration: 'underline',
+    textTransform: 'none',
+    letterSpacing: 'normal',
+  },
+  followUpQuestion: {
+    fontFamily: SERIF,
+    fontSize: 16,
+    fontWeight: 700,
+    color: '#1a160f',
+    margin: '10px 0 4px',
+    paddingTop: 14,
+    borderTop: '1px solid #e3d9c6',
+  },
   input: {
     width: '100%',
     padding: '10px 14px',
@@ -1066,6 +1153,37 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
     gap: 1,
+  },
+  chatTopRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 18,
+    paddingBottom: 12,
+    borderBottom: '1px solid #e3d9c6',
+  },
+  chatHeaderTitle: {
+    fontFamily: SERIF,
+    fontSize: 17,
+    fontWeight: 700,
+    color: '#1a160f',
+  },
+  stickyBar: {
+    position: 'fixed',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 10,
+    background: '#f6f2ea',
+    borderTop: '1px solid #e3d9c6',
+    padding: '14px 16px',
+    boxShadow: '0 -4px 12px rgba(38, 34, 26, 0.05)',
+  },
+  stickyBarForm: {
+    display: 'flex',
+    gap: 10,
+    maxWidth: 780,
+    margin: '0 auto',
   },
   logRow: {
     display: 'flex',

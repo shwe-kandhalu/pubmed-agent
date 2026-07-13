@@ -37,12 +37,13 @@ app.add_middleware(
 
 class ResearchRequest(BaseModel):
     question: str
+    session_id: str | None = None
 
 
 @app.post("/api/research", dependencies=[Depends(enforce_rate_limit)])
 async def research(body: ResearchRequest, x_user_api_key: str | None = Header(default=None)):
     return StreamingResponse(
-        run_agent_streaming(body.question, user_api_key=x_user_api_key or None),
+        run_agent_streaming(body.question, session_id=body.session_id, user_api_key=x_user_api_key or None),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

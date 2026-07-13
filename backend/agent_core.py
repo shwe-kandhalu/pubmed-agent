@@ -16,6 +16,20 @@ load_dotenv()
 
 MOCK_MODE = os.environ.get("MOCK_MODE") == "true"
 
+# In-memory conversation state, so a follow-up question can resume the same message history,
+# vector-DB scope, and paper/groundedness registries instead of starting over. Single-process
+# only — fine for this app's scale, would need a shared store (Redis etc.) behind multiple workers.
+_SESSION_TTL_SECONDS = 30 * 60
+_sessions: dict[str, dict] = {}
+
+
+def _cleanup_sessions() -> None:
+    now = time.time()
+    expired = [sid for sid, s in _sessions.items() if now - s["last_used"] > _SESSION_TTL_SECONDS]
+    for sid in expired:
+        del _sessions[sid]
+
+
 _CITATION_ID = re.compile(
     r"(?:" + "|".join(re.escape(k) for k in SOURCES) + r"):[^\s,;()]+"
 )
@@ -103,7 +117,7 @@ Workflow:
 4. Call retrieve_relevant_context with the original research question to pull the most pertinent indexed content.
 5. Write a comprehensive literature review grounded in the retrieved content.
 
-Report format:
+Report format (for the first question in a conversation):
 ## Key Findings
 Cite papers inline using their id, e.g. (pubmed:38211234) or (openalex:W2741809807). For multiple citations in one place, separate ids with commas, e.g. (pubmed:38211234, openalex:W2741809807).
 
@@ -113,7 +127,9 @@ Cite papers inline using their id, e.g. (pubmed:38211234) or (openalex:W27418098
 
 ## Research Gaps
 
-Keep the report under 700 words. Prioritize synthesis and interpretation over listing. Ground every claim in a specific paper."""
+Keep the report under 700 words. Prioritize synthesis and interpretation over listing. Ground every claim in a specific paper.
+
+Follow-up questions: if there's already a report earlier in this conversation, this is a follow-up, not a new review. Answer conversationally and concisely (a few sentences to a short paragraph, not the full section structure above) using the same inline citation style. Check retrieve_relevant_context against what's already indexed before deciding you need a new search — most follow-ups can be answered from what you already read. Only search or fetch further if the question genuinely isn't covered by what's already in the knowledge base."""
 
 
 def search_literature(query: str, sources: list[str] | None = None, max_results: int = 8) -> str:
@@ -237,10 +253,11 @@ Clinicians should consider widget dosage titration based on patient response, wi
 Long-term outcomes beyond 12 months remain understudied, and no trial has directly compared widget formulations head-to-head (pubmed:90000002)."""
 
 
-async def _mock_run(question: str) -> AsyncGenerator[str, None]:
+async def _mock_run(question: str, session_id: str | None = None) -> AsyncGenerator[str, None]:
     """Streams a canned run with no Claude/API calls, for testing the UI without spending credits.
     Enable with MOCK_MODE=true in the backend's environment."""
     steps = [
+        {"type": "session", "session_id": session_id or uuid.uuid4().hex},
         {"type": "tool_call", "name": "search_literature", "input": {"query": question, "sources": DEFAULT_SEARCH_SOURCES}},
         {"type": "references", "papers": _MOCK_PAPERS},
         {"type": "tool_result", "name": "search_literature", "result": "Found 5 mock papers across 4 sources."},
@@ -270,23 +287,39 @@ async def _mock_run(question: str) -> AsyncGenerator[str, None]:
     yield _sse({"type": "done"})
 
 
-async def run_agent_streaming(question: str, user_api_key: str | None = None) -> AsyncGenerator[str, None]:
+async def run_agent_streaming(
+    question: str, session_id: str | None = None, user_api_key: str | None = None
+) -> AsyncGenerator[str, None]:
     # A visitor-supplied key always means "give me the real thing," even if this deployment
     # otherwise defaults to mock mode for anyone who hasn't brought their own key.
     if MOCK_MODE and not user_api_key:
-        async for chunk in _mock_run(question):
+        async for chunk in _mock_run(question, session_id):
             yield chunk
         return
 
     client = anthropic.AsyncAnthropic(api_key=user_api_key) if user_api_key else anthropic.AsyncAnthropic()
     system = SYSTEM
 
-    run_id = uuid.uuid4().hex
+    _cleanup_sessions()
+    session = _sessions.get(session_id) if session_id else None
+    if session:
+        run_id = session["run_id"]
+        messages = session["messages"]
+        paper_registry = session["paper_registry"]
+        grounded_types = session["grounded_types"]
+    else:
+        session_id = uuid.uuid4().hex
+        run_id = uuid.uuid4().hex
+        messages = []
+        paper_registry = {}
+        grounded_types = {}
+
+    yield _sse({"type": "session", "session_id": session_id})
+
+    messages.append({"role": "user", "content": question})
+
     trace = RunTrace(run_id, question)
-    messages = [{"role": "user", "content": question}]
     MAX_STEPS = 12
-    paper_registry: dict[str, dict] = {}
-    grounded_types: dict[str, set[str]] = {}
     report_text = ""
     final_message = None
 
@@ -388,4 +421,13 @@ async def run_agent_streaming(question: str, user_api_key: str | None = None) ->
         ungrounded_count=len(ungrounded_ids),
         abstract_only_count=len(abstract_only_ids),
     )
+
+    _sessions[session_id] = {
+        "run_id": run_id,
+        "messages": messages,
+        "paper_registry": paper_registry,
+        "grounded_types": grounded_types,
+        "last_used": time.time(),
+    }
+
     yield _sse({"type": "done"})
